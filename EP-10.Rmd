@@ -1,0 +1,376 @@
+---
+title: "EP10-Estadistica"
+author: "Equipo 4"
+date: "29-07-2026"
+output:
+  html_document:
+    toc: true # Activa la tabla de contenidos (índice)
+    toc_float: true # Permite que el índice se mueva al hacer scroll
+    toc_depth: 3 # Define la cantidad de niveles de títulos
+    theme: flatly # Tema visual (bootstrap)
+    highlight: pygments # Define el estilo del código (colores)
+    df_print: paged # Hace paginado al mostrar data frames
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, # Muestra código R en el documento
+  # warning   = FALSE, # Oculta advertencias
+  message = FALSE, # Oculta mensajes (como los de carga de paquetes)
+  fig.align = "center", # Centra imágenes
+  fig.width = 7,
+  fig.height = 4 # Parámetros para el tamaño de gráficas
+)
+```
+
+
+# Contexto
+
+Un estudio recolectó medidas anatómicas de 247 hombres y 260 mujeres (Heinz et al., 2003).
+El estudio incluyó nueve mediciones del esqueleto (ocho diámetros y una profundidad de hueso a hueso) y doce mediciones de grosor (circunferencias) que incluyen el tejido.
+
+# Preguntas
+
+## Primera parte (variable dicotómica):
+
+1. El equipo crea la variable IMC (índice de masa corporal) como el peso de una persona (en kilogramos) dividida por el cuadrado de su estatura (en metros).
+
+2. Si bien esta variable se usa para clasificar a las personas en varias clases de estado nutricional (bajo peso, normal, sobrepeso, obesidad, obesidad mórbida), para efectos de este ejercicio, usaremos dos clases: sobrepeso (IMC ≥ 23,2) y no sobrepeso (IMC < 23,2).
+
+3. El equipo crea la variable dicotómica EN (estado nutricional) de acuerdo al valor de IMC de cada persona.
+   
+   
+## Segunda parte (modelo de regresión logística para predecir la variable EN):
+
+1. Asegurando reproducibilidad, seleccionar una muestra de 150 mujeres (si su n° de equipo es un número par) o 150 hombres (si su n° de equipo es impar), asegurando que la mitad tenga estado nutricional “sobrepeso” y la otra mitad “no sobrepeso” en cada caso. Dividir esta muestra en dos conjuntos: los datos de 100 personas (50 con EN “sobrepeso”) para utilizar en la construcción de los modelos y 50 personas (25 con EN “sobrepeso”) para poder evaluarlos.
+
+2. Recordar las ocho posibles variables predictoras seleccionadas de forma aleatoria en el ejercicio anterior.
+
+3. Seleccionar, de las otras variables, una que el equipo considere que podría ser útil para predecir la clase EN, justificando bien esta selección (idealmente con literatura).
+
+4. Usando el entorno R, construir un modelo de regresión logística con el predictor seleccionado en el paso anterior y utilizando de la muestra obtenida.
+
+5. Usando herramientas estándares1 para la exploración de modelos del entorno R, buscar entre dos y cinco predictores de entre las variables seleccionadas al azar, recordadas en el punto 2, para agregar al modelo obtenido en el paso 4.
+
+6. Evaluar la confiabilidad y generalidad de los modelos (i.e. que tengan un buen nivel de ajuste, que cumplen las condiciones para RLogit y no están dominados por casos sobreinfluyentes) y “arreglarlos” en caso de que tengan algún problema.
+
+7. Usando código estándar, evaluar el poder predictivo de los modelos con los datos de las 50 personas que no se incluyeron en su construcción en términos de sensibilidad y especificidad.
+
+## Primera parte
+
+### 1) 
+
+Se pide crear la variable IMC (índice de masa corporal): el peso (kg) dividido por el cuadrado de la estatura (m) y debido a que height está en cm en el archivo original, se divide por 100.
+
+```{r}
+library(dplyr)
+
+# Cargar los datos
+datos <- read.csv2("EP09 Datos.csv")
+
+datos <- datos |>
+  mutate(IMC = Weight / (Height / 100)^2)
+```
+
+### 2)
+Ahora se clasifica en dos clases según el umbral IMC = 23.2:
+
+- sobrepeso: IMC >= 23,2
+- no sobrepeso: IMC < 23,2
+
+```{r}
+datos <- datos |>
+  mutate(clase_sobrepeso = ifelse(IMC >= 23.2, "sobrepeso", "no sobrepeso"))
+
+# Resultados
+head(datos |> select(Weight, Height, IMC, clase_sobrepeso))
+cat("\nDistribución de la clasificación:\n")
+print(table(datos$clase_sobrepeso))
+```
+
+### 3) 
+
+Se crea la variable dicotómica EN (estado nutricional) de acuerdo al valor de IMC y se transforma a factor para futuros análisis.
+
+
+```{r}
+# Crear la variable dicotómica EN
+datos <- datos |>
+  mutate(EN = ifelse(IMC >= 23.2, "sobrepeso", "no sobrepeso")) |>
+  # Convertir a factor para que R entienda que es una variable categórica
+  mutate(EN = factor(EN, levels = c("no sobrepeso", "sobrepeso")))
+
+# Verificamos los resultados mostrando las primeras filas
+head(datos |> select(Weight, Height, IMC, EN))
+
+# Vemos un resumen de la nueva variable dicotómica
+cat("\nDistribución del Estado Nutricional (EN):\n")
+summary(datos$EN)
+```
+
+
+## Segunda parte
+### 1) 
+
+```{r}
+# Fijamos una semilla para asegurar la reproducibilidad
+set.seed(42)
+
+# Filtramos la base para quedarnos solo con mujeres (Gender == 0)
+mujeres <- datos |> filter(Gender == 0)
+
+# Seleccionamos aleatoriamente 75 mujeres de cada clase (75 + 75 = 150 en total)
+muestra_sobrepeso <- mujeres |>
+  filter(EN == "sobrepeso") |>
+  sample_n(75)
+muestra_no_sobrepeso <- mujeres |>
+  filter(EN == "no sobrepeso") |>
+  sample_n(75)
+
+# Construimos los datos de entrenamiento (50 de cada clase)
+train_sobrepeso <- muestra_sobrepeso |> slice(1:50)
+train_no_sobrepeso <- muestra_no_sobrepeso |> slice(1:50)
+datos_entrenamiento <- bind_rows(train_sobrepeso, train_no_sobrepeso)
+
+# Construimos los datos de prueba con los restantes (25 de cada clase)
+test_sobrepeso <- muestra_sobrepeso |> slice(51:75)
+test_no_sobrepeso <- muestra_no_sobrepeso |> slice(51:75)
+datos_prueba <- bind_rows(test_sobrepeso, test_no_sobrepeso)
+
+# Verificamos que se haya hecho correctamente
+cat("Total datos de entrenamiento:", nrow(datos_entrenamiento), "\n")
+cat("Distribución en Entrenamiento:\n")
+print(table(datos_entrenamiento$EN))
+
+cat("\nTotal datos de prueba:", nrow(datos_prueba), "\n")
+cat("Distribución en Prueba:\n")
+print(table(datos_prueba$EN))
+```
+### 2)
+
+Recordamos las 8 variables utilizadas en el desarrollo del EP09:
+
+```{r}
+library(knitr)
+
+# 1. Crear un data.frame con las variables y sus descripciones
+tabla_variables <- data.frame(
+  Variable = c("Knee.Girth", "Bitrochanteric.diameter", "Chest.diameter", "Calf.Maximum.Girth", "Bicep.Girth", "Chest.depth", "Chest.Girth", "Elbows.diameter"),
+  Descripción = c(
+    "Grosor promedio de ambas rodillas, posición levemente flectada, medición arriba de la rótula",
+    "Diámetro bitrocantéreo (a la altura de las caderas)",
+    "Diámetro del pecho (a la altura de los pezones)",
+    "Grosor promedio de la parte más ancha de ambas pantorrillas", "Grosor promedio de ambos bíceps, brazos flectados", "Profundidad del pecho (entre la espina y el esternón a la altura de los pezones)", "Grosor del pecho, sobre tejido mamario en mujeres y a la altura de los pezones en varones", "Suma de los diámetros de los codos"
+  )
+)
+
+# 2. Generar la tabla en formato Markdown con kable
+kable(
+  tabla_variables,
+  col.names = c("Variable", "Descripción"),
+  caption = "Descripción de las variables utilizadas en el estudio."
+)
+```
+
+### 3)
+
+En la literatura Heinz, G., Peterson, L. J., Johnson, R. W., & Kerk, C. J. (2003), se realiza un análisis de regresión para predecir el peso obteniendo la ecuación:
+
+Weight (kg) = - 120 + 0.0781 Shoulder Girth + 0.198 Chest Girth (1)+ 0.340 Waist Girth + 0.0012 Navel Girth+ 0.240 Hip Girth + 0.314 Thigh Girth + 0.0547 Flexed Bicep Girth+ 0.532 Forearm Girth + 0.301 Knee Girth + 0.404 Calf Maximum Girth- 0.0096 Ankle Minimum Girth - 0.118 Wrist Minimum Girth+ 0.328 Height
+
+Además se indica el ajuste presenta un R^2 de 97.3% y se menciona que existe una linealidad razonable entre el peso y las medidas de circunferencia (Girth) junto a la altura.
+
+Como buscamos predecir la variable EN creada, la cual depende del IMC, y a su vez, del peso y la altura, se calculan los valores de correlación entre el IMC y las demás variables. El mayor valor de correlación lo presenta la variable Waist.Girth que será nuevamente utilizada como predictor inicial
+
+```{r}
+# Selecciona únicamente las columnas que son numéricas o enteras
+datos_numericos <- datos_entrenamiento |>
+  select(where(is.numeric))
+
+matriz_correlacion <- cor(datos_numericos, use = "complete.obs")
+
+correlaciones_con_imc <- matriz_correlacion["IMC", ]
+print(round(correlaciones_con_imc, 3))
+```
+
+### 4)
+Se construye el modelo de regresión logística para el predictor Waist.Girth:
+
+```{r}
+modelo_log <- glm(EN ~ Waist.Girth, family = binomial(link = "logit"), data = datos_entrenamiento)
+print(summary(modelo_log), signif.stars = FALSE)
+cat("---\n")
+print(anova(modelo_log, test = "LRT"), signif.stars = FALSE)
+```
+
+
+### 5)
+Para agregar predictores al modelo obtenido en el paso 4, se recomienda usar herramientas estándares de búsqueda de modelos para explorar entre las variables candidatas cuál combinación produce el mejor ajuste, evitando al mismo tiempo caer en problemas de convergencia. 
+
+```{r}
+# Modelo mínimo (el obtenido en el paso 4) y modelo máximo
+# (agregando las 8 variables candidatas recordadas en el paso 2)
+nulo <- modelo_log
+maxi <- glm(
+  EN ~ Waist.Girth + Knee.Girth + Bicep.Girth + Bitrochanteric.diameter +
+    Chest.depth + Chest.diameter + Chest.Girth + Calf.Maximum.Girth +
+    Elbows.diameter,
+  family = binomial(link = "logit"), data = datos_entrenamiento
+)
+
+# regresión escalonada
+modelo_step <- step(nulo,
+  scope = list(lower = nulo, upper = maxi),
+  direction = "both", trace = 1
+)
+
+cat("\nModelo obtenido con regresión escalonada:\n")
+print(summary(modelo_step))
+
+cat("\nComparación RLogitS (paso 4) vs RLogitM (paso 5):\n")
+print(anova(nulo, modelo_step, test = "LRT"))
+```
+No se utiliza la regresión hacia adelante manual con add1(), porque esta alternativa se utiliza solo cuando la regresión escalonada realizada falla por problemas de convergencia, lo cuál no sucede en este caso.
+
+### 6)
+Para evaluar la confiabilidad y generalidad del modelo obtenido mediante regresión escalonada (paso 5), se analizarán tres aspectos fundamentales: la bondad de ajuste (Pseudo $R^2$), el supuesto de no multicolinealidad (VIF) y la posible presencia de casos sobreinfluyentes (Distancia de Cook) que puedan estar distorsionando los coeficientes.
+```{r}
+library(car)
+library(DescTools)
+
+cat("--- 1. EVALUACIÓN DEL NIVEL DE AJUSTE ---\n")
+# Se utiliza el Pseudo R-cuadrado de McFadden como métrica de bondad de ajuste.
+# En regresión logística, valores entre 0.2 y 0.4 ya se consideran excelentes.
+pseudo_r2 <- PseudoR2(modelo_step, which = "McFadden")
+cat("Pseudo R-cuadrado de McFadden:", round(pseudo_r2, 3), "\n")
+
+cat("\n--- 2. CONDICIONES: MULTICOLINEALIDAD (VIF) ---\n")
+# Se revisa el Factor de Inflación de la Varianza (VIF) para asegurar que
+# las variables predictoras aportan información independiente.
+# Si un valor supera el umbral de 5, indicaría multicolinealidad problemática.
+print(vif(modelo_step))
+
+cat("\n--- 3. CASOS SOBREINFLUYENTES (Distancia de Cook) ---\n")
+# Se calcula la distancia de Cook para identificar observaciones con valores
+# atípicos que ejerzan una influencia desproporcionada en el modelo.
+distancia_cook <- cooks.distance(modelo_step)
+
+# Se define el umbral estándar (4 / n) para catalogar un caso como altamente influyente
+umbral_cook <- 4 / nrow(datos_entrenamiento)
+casos_influyentes <- which(distancia_cook > umbral_cook)
+
+cat("Umbral de Distancia de Cook:", round(umbral_cook, 4), "\n")
+cat("Cantidad de casos que superan el umbral:", length(casos_influyentes), "\n")
+if (length(casos_influyentes) > 0) {
+  print(casos_influyentes)
+}
+```
+Como se observa en los resultados anteriores, el ajuste del modelo es bueno y los valores VIF son todos cercanos a 1, por lo que se descartan problemas de multicolinealidad. Sin embargo, la prueba de Distancia de Cook revela la existencia de observaciones que superan el umbral de influencia.
+
+Para solucionar este problema y asegurar que el modelo sea generalizable (y no esté sesgado por estos valores atípicos), se procede a depurar el conjunto de entrenamiento eliminando estos casos y se ajusta el modelo definitivo.
+```{r}
+cat("\n--- ARREGLO DEL MODELO (DEPURACIÓN) ---\n")
+# 1. Se crea un nuevo set de datos excluyendo las filas problemáticas
+datos_entrenamiento_limpios <- datos_entrenamiento[-casos_influyentes, ]
+
+# 2. Se actualiza el modelo escalonado utilizando únicamente los datos limpios
+modelo_final <- update(modelo_step, data = datos_entrenamiento_limpios)
+
+# 3. Se verifica el impacto de la limpieza en la bondad de ajuste
+pseudo_r2_final <- PseudoR2(modelo_final, which = "McFadden")
+cat("Nuevo Pseudo R-cuadrado sin outliers:", round(pseudo_r2_final, 3), "\n")
+
+# Se expone el resumen del modelo definitivo
+summary(modelo_final)
+```
+Al eliminar los casos influyentes, podemos notar cómo el Pseudo R-cuadrado experimenta una mejora o se estabiliza, indicando que hemos obtenido un modelo final robusto, confiable y teóricamente apto para realizar predicciones sobre datos no vistos.
+
+### 7)
+
+Se pide evaluar el poder predictivo de los modelos, a partir de los datos de prueba que fueron obtenidos en el paso 1 del ejercicio. Para ello, se obtienen las probabilidades que predicen los modelos obtenidos usando la función predict(). Se arma la matriz de confusión que permite clasificar los resultados obtenidos, para luego calcular sensibilidad y especificidad. Al final, se grafica la curva ROC teniendo como referencia el modelo con AUC = 0.5 (curva diagonal).
+
+```{r}
+# Obtener las probabilidades predichas para el conjunto de prueba
+# Se usa type = "response" para obtener la probabilidad P(y = 1 | x)
+probabilidades_prueba <- predict(modelo_final, newdata = datos_prueba, type = "response")
+
+# Clasificación binaria usando el umbral tradicional de 0.5
+umbral <- 0.5
+predicciones_clase <- ifelse(probabilidades_prueba >= umbral, "sobrepeso", "no sobrepeso")
+
+# Convertir las predicciones a factor asegurando los mismos niveles
+predicciones_clase <- factor(predicciones_clase, levels = c("no sobrepeso", "sobrepeso"))
+
+# Construir la matriz de confusión (Tabla de Contingencia)
+matriz_confusion <- table(Prediccion = predicciones_clase, Real = datos_prueba$EN)
+
+cat("--- MATRIZ DE CONFUSIÓN ---\n")
+print(matriz_confusion)
+
+# Extraer los valores de la matriz para calcular las métricas
+VN <- matriz_confusion["no sobrepeso", "no sobrepeso"]
+FN <- matriz_confusion["no sobrepeso", "sobrepeso"]
+FP <- matriz_confusion["sobrepeso", "no sobrepeso"]
+VP <- matriz_confusion["sobrepeso", "sobrepeso"]
+
+# Calcular exactitud, sensibilidad y especificidad
+exactitud <- (VP + VN) / nrow(datos_prueba)
+sensibilidad <- VP / (VP + FN)
+especificidad <- VN / (FP + VN)
+
+cat("\n--- MÉTRICAS DE PODER PREDICTIVO (CONJUNTO DE PRUEBA) ---\n")
+cat(sprintf("Exactitud:     %.3f\n", exactitud))
+cat(sprintf("Sensibilidad:  %.3f\n", sensibilidad))
+cat(sprintf("Especificidad: %.3f\n", especificidad))
+
+# Construcción y gráfico de la Curva ROC (usando R base)
+orden <- order(probabilidades_prueba, decreasing = TRUE)
+obs_ordenadas <- datos_prueba$EN[orden] == "sobrepeso"
+
+n_pos <- sum(obs_ordenadas)
+n_neg <- length(obs_ordenadas) - n_pos
+
+tpr <- cumsum(obs_ordenadas) / n_pos   # Sensibilidad (Verdaderos Positivos)
+fpr <- cumsum(!obs_ordenadas) / n_neg # 1 - Especificidad (Falsos Positivos)
+
+tpr <- c(0, tpr)
+fpr <- c(0, fpr)
+
+# Generar el gráfico ROC
+plot(fpr, tpr, type = "l", col = "blue", lwd = 2,
+     main = "Curva ROC - Modelo de Regresión Logística",
+     xlab = "Especificidad (Tasa de Falsos Positivos)",
+     ylab = "Sensibilidad (Tasa de Verdaderos Positivos)")
+abline(a = 0, b = 1, lty = 2, col = "gray") # Línea diagonal de referencia (AUC = 0.5)
+
+# Cálculo exacto del AUC mediante aproximación trapezoidal
+ancho <- diff(fpr)
+altura <- (tpr[-1] + tpr[-length(tpr)]) / 2
+auc_valor <- sum(ancho * altura)
+
+# Mostrar el resultado del AUC en consola y sobre el gráfico
+cat(sprintf("\nÁrea Bajo la Curva (AUC): %.3f\n", auc_valor))
+text(0.6, 0.2, labels = paste("AUC =", round(auc_valor, 3)), col = "darkblue", cex = 1.2)
+```
+
+Como observación, dado que los datos de prueba tienen relativamente pocas observaciones (50), la curva no es suave, si no que más bien, escalonada con "saltos". De todas maneras, es posible calcular el área bajo la curva (AUC) para utilizarlo como indicador de la calidad del clasificador.
+
+# Conclusiones
+
+Durante el desarrollo del presente trabajo, se ha trabajado con un conjunto de 507 datos de medidas de circunferencia corporal y diámetro esquelético, así como edad, peso, estatura y sexo. Se ha logrado agregar dos nuevas columnas, una para IMC que se calcula a partir del peso y la estatura, y otra para EN que es una variable categórica con dos posibles valores ("sobrepeso", "no sobrepeso"), para la cual se creó un modelo de regresión logística que permitiría predecir la probabilidad de que ocurra el evento "sobrepeso" o "no sobrepeso".
+
+Luego, se realizó el proceso de toma de muestras generando dos conjuntos (únicamente de mujeres), el primero usado para la construcción/entrenamiento del modelo y el segundo utilizado para ser usado en la predicción de nuevos valores.
+
+Se selecciona la variable Waist.Girth (circunferencia de la cintura) para utilizarla en el modelo base obteniendo un estimador de 0.44018, un z value de 4.744 y un valor p de 2.10e-06, mostrando que Waist.Girth es un predictor significativo para estimar la variable EN. También se aplica la función anova() que entrega un valor p menor a 2.2e-16 indicando el modelo de un predictor es significativamente mejor que el modelo nulo (sin predictores).
+
+Para el paso 5 se utiliza regresión escalonada con el criterio de menor AIC, para hallar un modelo múltiple. Se obtienen los valores de los coeficientes para cada predictor resultando todos positivos, lo que indica que a mayor valor de circunferencia o diámetro de las variables, mayor será la probabilidad de que una persona pertenezca a la categoría "sobrepeso". Las pruebas de Wald resultan no significativas para un valor alpha igual a 0.05, excepto para Chest.Girth (circunferencia del pecho), por lo que los resultados siguientes se deberán tratar con cautela. A pesar de ello, se ha logrado disminuir el valor de AIC con el nuevo modelo y su comparación frente al modelo nulo resulta significativa.
+
+Se hizo una prueba de Pseudo R-cuadrado de McFadden obteniendo 0.632, lo cual es un buen indicador para la bondad de ajuste del conjunto de entrenamiento. Para la multicolinealidad se obtuvo valores VIF entre 1 y 1.5, que tomando un umbral de 5, indica que el modelo cumple con el supuesto de no multicolinealidad. Seguido a ello, se analizan casos sobreinfluyentes mediante la distancia de Cook resultando en 9 observaciones que superan el umbral de 4/n, lo que puede generar problemas sobre la estimación de los coeficientes del modelo. Se procede a la eliminación de outliers, haciendo nuevamente las pruebas. Pseudo R-cuadrado de McFadden aumenta a 0.862 y el AIC disminuye de 60.994 hasta 27.439, obteniendo un modelo con un ajuste superior.
+
+Por último, al evaluar el poder predictivo de los modelos sobre los datos de prueba (muestra n=50) se obtuvo una exactitud del 88% (tasa de acierto global), una sensibilidad del 80% (el modelo fue capaz de identificar correctamente a 20 de las 25 personas que realmente pertenecían a la categoría de "sobrepeso") y una especificidad del 96% (hubo un único falso positivo). El AUC obtenido es de 0.971, por lo que se concluye que el modelo final presenta una gran capacidad de clasificación de las observaciones.
+
+# Referencias
+
+Jara, J. L., & Köhler, J. (s. f.). Inferencia y modelos estadísticos [Perusall].
+
+Heinz, G., Peterson, L. J., Johnson, R. W., & Kerk, C. J. (2003). Exploring Relationships in Body Dimensions. Journal Of Statistics Education, 11(2). https://doi.org/10.1080/10691898.2003.11910711
